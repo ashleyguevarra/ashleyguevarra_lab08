@@ -1,0 +1,11 @@
+flowchart LR
+  subgraph lab6 ["Labo 6 - orchestré"]
+    O[Orchestrateur] -->|HTTP sync| A[Service A]
+    O -->|HTTP sync| B[Service B]
+  end
+  subgraph lab8 ["Labo 8 - chorégraphié"]
+    SM[Store Manager] -->|publish| K[(Kafka)]
+    K -->|OrderEventConsumer| H[Handlers SM]
+    H -->|publish| K
+    PA[Payments API lab05] -->|consume + publish| K
+  end

@@ -1,0 +1,9 @@
+sequenceDiagram
+  participant App as Application
+  participant DB as Base de données
+  participant Outbox as Table Outbox
+  participant Ext as API externe / broker
+  App->>DB: Transaction : métier + ligne Outbox
+  App->>DB: commit
+  App->>Outbox: OutboxProcessor / worker
+  Outbox->>Ext: HTTP ou publish (après persistance)

@@ -1,12 +1,14 @@
 """
-Handler: Stock Decreased
+Handler: Stock Increased
 SPDX-License-Identifier: LGPL-3.0-or-later
 Auteurs : Gabriel C. Ullmann, Fabio Petrillo, 2025
 """
 from typing import Dict, Any
 import config
+from db import get_sqlalchemy_session
 from event_management.base_handler import EventHandler
 from orders.commands.order_event_producer import OrderEventProducer
+from stocks.commands.write_stock import check_in_items_to_stock, update_stock_redis
 
 
 class StockIncreasedHandler(EventHandler):
@@ -22,15 +24,18 @@ class StockIncreasedHandler(EventHandler):
     
     def handle(self, event_data: Dict[str, Any]) -> None:
         """Execute every time the event is published"""
-        # TODO: Consultez le diagramme de machine à états pour savoir quelle opération effectuer dans cette méthode. 
-
+        session = None
         try:
-            # Si l'operation a réussi, déclenchez OrderCancelled.
+            session = get_sqlalchemy_session()
+            check_in_items_to_stock(session, event_data['order_items'])
+            session.commit()
+            update_stock_redis(event_data['order_items'], '+')
             event_data['event'] = "OrderCancelled"
             OrderEventProducer().get_instance().send(config.KAFKA_TOPIC, value=event_data)
         except Exception as e:
-            # TODO: Si l'operation a échoué, continuez la compensation des étapes précedentes.
+            if session is not None:
+                session.rollback()
             event_data['error'] = str(e)
-
-
-
+        finally:
+            if session is not None:
+                session.close()

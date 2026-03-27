@@ -34,7 +34,7 @@ def update_order(request):
 
     try:
         # update MySQL
-        status = modify_order(order_id, payment_link=payment_link, is_paid=is_paid)
+        status = modify_order(order_id, is_paid=is_paid, payment_link=payment_link)
         
         # update Redis
         r = get_redis_conn()

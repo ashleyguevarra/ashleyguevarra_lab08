@@ -5,8 +5,11 @@ Auteurs : Gabriel C. Ullmann, Fabio Petrillo, 2025
 """
 from typing import Dict, Any
 import config
+from db import get_redis_conn
 from event_management.base_handler import EventHandler
 from orders.commands.order_event_producer import OrderEventProducer
+from orders.commands.write_order import sync_order_payment_link_redis
+
 
 class PaymentCreatedHandler(EventHandler):
     """Handles PaymentCreated events"""
@@ -21,18 +24,16 @@ class PaymentCreatedHandler(EventHandler):
     
     def handle(self, event_data: Dict[str, Any]) -> None:
         """Execute every time the event is published"""
-        # TODO: Consultez le diagramme de machine à états pour savoir quelle opération effectuer dans cette méthode. Mettez votre commande à jour avec le nouveau payment_id.
-        # N'oubliez pas d'enregistrer le payment_link dans votre commande
-        event_data["payment_link"] = "todo-add-payment-link-here"
-
+        r = get_redis_conn()
+        dedupe_key = f"saga:payment_created:{event_data['order_id']}"
+        if not r.set(dedupe_key, "1", nx=True, ex=3600):
+            return
         try:
-            # Si l'operation a réussi, déclenchez SagaCompleted.
+            payment_link = event_data.get('payment_link', 'no-link')
+            sync_order_payment_link_redis(event_data['order_id'], payment_link, is_paid=True)
             event_data['event'] = "SagaCompleted"
-            self.logger.debug(f"payment_link={event_data['payment_link']}")
+            self.logger.debug(f"payment_link={payment_link}")
             OrderEventProducer().get_instance().send(config.KAFKA_TOPIC, value=event_data)
-
         except Exception as e:
-            # TODO: Si l'operation a échoué, déclenchez l'événement adéquat selon le diagramme.
+            r.delete(dedupe_key)
             event_data['error'] = str(e)
-
-

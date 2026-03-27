@@ -9,7 +9,7 @@ import config
 from db import get_sqlalchemy_session
 from logger import Logger
 from orders.commands.order_event_producer import OrderEventProducer
-from orders.commands.write_order import modify_order
+from orders.commands.write_order import modify_order, sync_order_payment_link_redis
 from payments.models.outbox import Outbox
 
 class OutboxProcessor():
@@ -50,14 +50,22 @@ class OutboxProcessor():
         try:       
             payment_response = self._request_payment_transaction(outbox_item)
             if payment_response.ok:
-                data = payment_response.json() 
-                order = session.query(Outbox).filter(Outbox.order_id == outbox_item.order_id).first()
-                order.payment_id = data['payment_id']
+                data = payment_response.json()
+                outbox_row = session.query(Outbox).filter(Outbox.order_id == outbox_item.order_id).first()
+                if not outbox_row:
+                    raise Exception("Enregistrement Outbox introuvable pour cette commande.")
+                outbox_row.payment_id = data['payment_id']
                 session.commit()
-                # TODO: après la mise à jour à MySQL, il faut également mettre la commande à jour dans Redis
-                # Vous pouvez réutiliser le code présent dans OrderController, lignes 40-43
-                update_succeeded = modify_order(event_data["order_id"], True, order.payment_id)
-                event_data["payment_link"] = f"http://api-gateway:8080/payments-api/payments/process/{order.payment_id}"
+                update_succeeded = modify_order(
+                    event_data["order_id"],
+                    is_paid=True,
+                    payment_id=outbox_row.payment_id,
+                )
+                event_data["payment_id"] = outbox_row.payment_id
+                event_data["payment_link"] = (
+                    f"http://api-gateway:8080/payments-api/payments/process/{outbox_row.payment_id}"
+                )
+                sync_order_payment_link_redis(event_data["order_id"], event_data["payment_link"], is_paid=True)
                 if not update_succeeded:
                     raise Exception(f"Erreur : la mise à jour de la commande après la génération du paiement a échoué.")
             else:

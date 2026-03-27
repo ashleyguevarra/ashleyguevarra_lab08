@@ -19,7 +19,8 @@ logger = Logger.get_instance("add_order")
 
 def add_order(user_id: int, items: list):
     """Insert order with items in MySQL, keep Redis in sync"""
-    event_data = {'event': 'OrderCreationFailed'} 
+    event_data = {'event': 'OrderCreationFailed'}
+    session = None
     try:
         if not items:
             raise ValueError("Cannot create order. An order must have 1 or more items.")
@@ -86,21 +87,28 @@ def add_order(user_id: int, items: list):
     except Exception as e:
         # Déclencher l'événement OrderCreationFailed
         event_data['error'] = str(e)
-        session.rollback()
+        if session is not None:
+            session.rollback()
         raise e
     finally:
         OrderEventProducer().get_instance().send(config.KAFKA_TOPIC, value=event_data)
-        session.close()
+        if session is not None:
+            session.close()
 
-def modify_order(order_id: int, is_paid: bool, payment_id: int):
+def modify_order(order_id: int, is_paid: bool = None, payment_id: int = None, payment_link: str = None):
     session = get_sqlalchemy_session()
     try:
         order = session.query(Order).filter(Order.id == order_id).first()
 
-        if order is not None and is_paid is not None:
+        if order is None:
+            return False
+
+        if is_paid is not None:
             order.is_paid = is_paid
 
-        if order is not None and payment_id is not None:
+        if payment_link is not None:
+            order.payment_link = payment_link
+        elif payment_id is not None:
             order.payment_link = f"http://api-gateway:8080/payments-api/payments/process/{payment_id}"
 
         session.commit()
@@ -116,6 +124,23 @@ def modify_order(order_id: int, is_paid: bool, payment_id: int):
         return False
     finally:
         session.close()
+
+def sync_order_payment_link_redis(order_id: int, payment_link: str, is_paid: bool = None):
+    """Met à jour payment_link (et optionnellement is_paid) pour la commande dans Redis."""
+    r = get_redis_conn()
+    key = f"order:{order_id}"
+    raw = r.hgetall(key)
+    if not raw:
+        return
+    mapping = {}
+    for k, v in raw.items():
+        kk = k.decode('utf-8') if isinstance(k, bytes) else k
+        vv = v.decode('utf-8') if isinstance(v, bytes) else v
+        mapping[kk] = vv
+    mapping['payment_link'] = payment_link
+    if is_paid is not None:
+        mapping['is_paid'] = str(is_paid)
+    r.hset(key, mapping=mapping)
 
 def delete_order(order_id: int):
     """Delete order in MySQL, keep Redis in sync"""

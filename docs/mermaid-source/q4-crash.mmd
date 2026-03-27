@@ -1,0 +1,6 @@
+stateDiagram-v2
+  [*] --> StockDecreased
+  StockDecreased --> OutboxCommitted : commit Outbox OK
+  StockDecreased --> Crash : kill -9 avant commit
+  Crash --> Incomplet : pas de ligne Outbox
+  OutboxCommitted --> OutboxProcessor

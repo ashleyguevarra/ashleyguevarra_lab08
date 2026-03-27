@@ -7,13 +7,15 @@ services:
     volumes:
       - .:/app
     ports:
-      - "5000:5000"
+      - "5001:5000"
     networks:
       - labo08-network
     depends_on:
       mysql:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
 
   mysql:
@@ -62,15 +64,62 @@ services:
     networks:
       - labo08-network
     depends_on:
-      - store_manager
-
+      store_manager:
+        condition: service_started
+      payments-api:
+        condition: service_started
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: lab08-jaeger
+    networks:
+      - labo08-network
+  mysql_payments:
+    image: mysql:8.4.7
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: labo05_payments_db
+      MYSQL_USER: labo05
+      MYSQL_PASSWORD: labo05
+    networks:
+      - labo08-network
+    volumes:
+      - mysql_payments_data:/var/lib/mysql
+      - ../ashleyguevarra_lab05_payement/db-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -proot"]
+      interval: 1m
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+  payments-api:
+    build: ../ashleyguevarra_lab05_payement
+    container_name: lab08-payments-api
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DB_HOST=mysql_payments
+      - DB_PORT=3306
+      - DB_NAME=labo05_payments_db
+      - DB_USER=labo05
+      - DB_PASSWORD=labo05
+      - KAFKA_HOST=kafka:29092
+      - KAFKA_TOPIC=order-saga-events
+      - KAFKA_GROUP_ID=payments-saga-group
+    volumes:
+      - ../ashleyguevarra_lab05_payement:/app
+    networks:
+      - labo08-network
+    depends_on:
+      mysql_payments:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     hostname: kafka
     container_name: kafka
-    ports:
-      - "9092:9092"
-      - "9101:9101"
     environment:
       CLUSTER_ID: "o0oqgfJkSRKy30HkVsAjBg"
       KAFKA_NODE_ID: 1
@@ -92,6 +141,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
+      start_period: 30s
     networks:
       - labo08-network
 
@@ -101,4 +151,5 @@ networks:
 
 volumes:
   mysql_data:
+  mysql_payments_data:
   prometheus_data:

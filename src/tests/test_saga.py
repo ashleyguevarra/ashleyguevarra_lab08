@@ -38,18 +38,28 @@ def test_saga(client):
     assert order_id > 0
     logger.debug(f"Created order with ID: {order_id}")
 
-    # Wait for 3s to give step 1 enough time to run
-    time.sleep(3)
-    
-    # 2. Check if order really exists and whether it has a payment link
-    response = client.get(f'/orders/{order_id}')
-    assert response.status_code == 201, f"Failed to get order: {response.get_json()}"
-    response = response.get_json()
-    logger.debug(response)
-    assert response["items"] is not None
-    assert int(response["user_id"]) > 0
-    assert float(response["total_amount"]) > 0
-    assert "http" in response["payment_link"]
+    # La saga est asynchrone (Kafka + handlers) : 3 s ne suffisent souvent pas (voir énoncé labo ~15–30 s).
+    deadline = time.time() + 60
+    response_json = None
+    while time.time() < deadline:
+        time.sleep(2)
+        response = client.get(f"/orders/{order_id}")
+        assert response.status_code == 201, f"Failed to get order: {response.get_json()}"
+        response_json = response.get_json()
+        pl = response_json.get("payment_link") or ""
+        if "http" in pl:
+            break
+    else:
+        pytest.fail(
+            "La saga n'a pas mis à jour payment_link dans Redis dans les 60 s "
+            f"(dernier état : {response_json})"
+        )
+
+    logger.debug(response_json)
+    assert response_json["items"] is not None
+    assert int(response_json["user_id"]) > 0
+    assert float(response_json["total_amount"]) > 0
+    assert "http" in (response_json.get("payment_link") or "")
     logger.debug(f"Order data is correct")
     
     # NOTE: si nous le voulions, nous pourrions également écrire des tests pour vérifier si l'enregistrement Outbox a été créé

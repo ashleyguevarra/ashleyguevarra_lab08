@@ -5,6 +5,7 @@ Auteurs : Gabriel C. Ullmann, Fabio Petrillo, 2025
 """
 import config
 import threading
+from payments.outbox_processor import OutboxProcessor
 from graphene import Schema
 from event_management.handler_registry import HandlerRegistry
 from orders.handlers.order_created_handler import OrderCreatedHandler
@@ -25,6 +26,11 @@ from stocks.controllers.product_controller import create_product, remove_product
 from stocks.controllers.stock_controller import get_stock, populate_redis_on_startup, set_stock, get_stock_overview
 
 app = Flask(__name__)
+
+is_outbox_processor_running = False
+if not is_outbox_processor_running:
+    OutboxProcessor().run()
+    is_outbox_processor_running = True
 
 # Auto-populate Redis 5s after API startup (to give enough time for the DB to start up as well)
 thread = threading.Timer(10.0, populate_redis_on_startup)
